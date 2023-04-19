@@ -1,5 +1,6 @@
-const {gameOptions, gameAgainOptions} = require('./options')
-
+const {gameOptions, gameAgainOptions} = require('./options');
+const sequelize = require('./db');
+const UserModel = require('./models');
 const TelegramApi = require('node-telegram-bot-api');
 
 const token = "5998712881:AAG79jxJPU41DyFeayiZWdm5juhhT8tGRy8";
@@ -15,9 +16,17 @@ const startGame = async (chat_id) => {
     await bot.sendMessage(chat_id, `Отгадывай, у тебя ${chats[chat_id][1]} попытки`, gameOptions);
 }
 
-const start = (bot) => {
+const start = async () => {
 
-    bot.setMyCommands([
+    try {
+        await sequelize.authenticate();
+        await sequelize.sync();
+
+    } catch (e) {
+        console.log("Подключение не удалось", e);
+    }
+
+    await bot.setMyCommands([
         {command: "/start", description: "Начальное приветствие"},
         {command: "/info", description: "Информация о боте"},
         {command: "/game", description: "Игра угадайка"},
@@ -27,17 +36,23 @@ const start = (bot) => {
         const message = msg.text;
         const chat_id = msg.chat.id;
 
-        if (message === '/start') {
-            await bot.sendMessage(chat_id, "Привет даун");
-        }
-        else if (message === "/info") {
-            await bot.sendMessage(chat_id, "Это тестовый бот");
-        }
-        else if (message === "/game") {
-            await startGame(chat_id);
-        }
-        else {
-            await bot.sendMessage(chat_id, `Ты написал мне: ${message}`);
+        try {
+
+            if (message === '/start') {
+                await bot.sendSticker(chat_id, './img/sticker.webp')
+                await UserModel.create({chat_id});
+                await bot.sendMessage(chat_id, "Привет даун");
+            } else if (message === "/info") {
+                const user = await UserModel.findOne({chat_id});
+                await bot.sendMessage(chat_id, "Это тестовый бот.");
+                await bot.sendMessage(chat_id, `В игре у тебя ${user.wrong} провалов и ${user.right} выигрышей`);
+            } else if (message === "/game") {
+                await startGame(chat_id);
+            } else {
+                await bot.sendMessage(chat_id, `Ты написал мне: ${message}`);
+            }
+        } catch (e) {
+            await bot.sendMessage(chat_id, `Возникла ошибка при обработке сообщения: ${e}`);
         }
     });
 
@@ -49,18 +64,22 @@ const start = (bot) => {
             await startGame(chat_id);
         }
         else {
+            const user = await UserModel.findOne({chat_id});
             if (chats[chat_id][0].toString() === data) {
                 await bot.sendMessage(chat_id, `Ты угадал!`, gameAgainOptions);
+                user.right += 1;
             } else {
                 --chats[chat_id][1];
                 if (chats[chat_id][1] <= 0) {
                     await bot.sendMessage(chat_id, "У тебя закончились попытки, ты проиграл.");
                     await bot.sendMessage(chat_id, `Число, которое я загадал, было: ${chats[chat_id][0]}`, gameAgainOptions);
                 } else {
+                    user.wrong += 1;
                     await bot.sendMessage(chat_id, `Неверно. Осталось попыток ${chats[chat_id][1]}`);
                     await bot.sendMessage(chat_id, `(Подсказка для писечки: число которое я загадал это ${chats[chat_id][0]}`);
                 }
             }
+            await user.save();
         }
 
     })
